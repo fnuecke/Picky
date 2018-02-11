@@ -17,7 +17,7 @@ public sealed class PickingProvider : MonoBehaviour
     /// ids into a lower-resolution texture. Its resolution is original resolution divided by this.
     /// </summary>
     [SerializeField, Range(1, 8), Tooltip("Value by which to divide original resolution to get lookup texture resolution.")]
-    private int scaleDivisor = 2;
+    private int scaleDivisor = 4;
 
     /// <summary>
     /// The replacement shader used to render pickable ids as colors, to be then retrieved
@@ -29,6 +29,13 @@ public sealed class PickingProvider : MonoBehaviour
     private new Camera camera; // Camera used to render with replacement shader.
     private RenderTexture gpuTexture; // GPU render texture we render pickable ids into.
     private Texture2D cpuTexture; // CPU side texture we read pickable ids from.
+
+#if UNITY_EDITOR
+    public Texture _Editor_GpuTexture
+    {
+        get { return gpuTexture; }
+    }
+#endif
 
     /// <summary>
     /// Retrieve the pickable present at the current location in camera screenspace, if any.
@@ -59,8 +66,10 @@ public sealed class PickingProvider : MonoBehaviour
 
             int depthBits = camera.depthTextureMode == DepthTextureMode.None ? 16 : 0;
             gpuTexture = new RenderTexture(camera.pixelWidth / scaleDivisor, camera.pixelHeight / scaleDivisor, depthBits, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            gpuTexture.filterMode = FilterMode.Point;
             cpuTexture = new Texture2D(camera.pixelWidth / scaleDivisor, camera.pixelHeight / scaleDivisor, TextureFormat.ARGB32, false, true);
             cpuTexture.filterMode = FilterMode.Point;
+            cpuTexture.wrapMode = TextureWrapMode.Clamp;
         }
 
         RenderTexture oldRenderTexture = camera.targetTexture;
