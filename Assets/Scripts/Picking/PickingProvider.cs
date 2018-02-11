@@ -16,7 +16,8 @@ public sealed class PickingProvider : MonoBehaviour
     /// picking), in which case we save some time and bandwidth by actually rendering the pickable
     /// ids into a lower-resolution texture. Its resolution is original resolution divided by this.
     /// </summary>
-    private const int ScaleDivisor = 2;
+    [SerializeField, Range(1, 8), Tooltip("Value by which to divide original resolution to get lookup texture resolution.")]
+    private int scaleDivisor = 2;
 
     /// <summary>
     /// The replacement shader used to render pickable ids as colors, to be then retrieved
@@ -40,7 +41,7 @@ public sealed class PickingProvider : MonoBehaviour
         if (cpuTexture == null)
             return null;
 
-        Color32 packedId = cpuTexture.GetPixel((int) screenPosition.x / 2, (int) screenPosition.y / 2);
+        Color32 packedId = cpuTexture.GetPixel((int) screenPosition.x / scaleDivisor, (int) screenPosition.y / scaleDivisor);
         int id = PickingManager.DecodeId(packedId);
         return PickingManager.GetPickable(id);
     }
@@ -51,14 +52,14 @@ public sealed class PickingProvider : MonoBehaviour
             camera = GetComponent<Camera>();
 
         // If camera size changed (e.g. window resize) also adjust sizes of our picking textures.
-        if (gpuTexture == null || gpuTexture.width != camera.pixelWidth / 2 || gpuTexture.height != camera.pixelHeight / 2)
+        if (gpuTexture == null || gpuTexture.width != camera.pixelWidth / scaleDivisor || gpuTexture.height != camera.pixelHeight / scaleDivisor)
         {
             if (gpuTexture != null) gpuTexture.Release();
             if (cpuTexture != null) Destroy(cpuTexture);
 
             int depthBits = camera.depthTextureMode == DepthTextureMode.None ? 16 : 0;
-            gpuTexture = new RenderTexture(camera.pixelWidth / ScaleDivisor, camera.pixelHeight / ScaleDivisor, depthBits, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
-            cpuTexture = new Texture2D(camera.pixelWidth / ScaleDivisor, camera.pixelHeight / ScaleDivisor, TextureFormat.ARGB32, false, true);
+            gpuTexture = new RenderTexture(camera.pixelWidth / scaleDivisor, camera.pixelHeight / scaleDivisor, depthBits, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            cpuTexture = new Texture2D(camera.pixelWidth / scaleDivisor, camera.pixelHeight / scaleDivisor, TextureFormat.ARGB32, false, true);
             cpuTexture.filterMode = FilterMode.Point;
         }
 
