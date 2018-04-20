@@ -1,5 +1,7 @@
 ﻿using JetBrains.Annotations;
+using Unity.Collections;
 using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 
 /// <summary>
 /// Manager to be used per camera that should provide picking. Usually only the main
@@ -27,14 +29,14 @@ public sealed class PickingProvider : MonoBehaviour
     private Shader objectIdShader;
 
     private new Camera camera; // Camera used to render with replacement shader.
+    private int dataWidth, dataHeight; // Width and height of scaled data on CPU.
     private RenderTexture gpuTexture; // GPU render texture we render pickable ids into.
-    private Texture2D cpuTexture; // CPU side texture we read pickable ids from.
+    private NativeArray<Color32> cpuData; // CPU color data, same values as stored in CPU texture.
+    private bool hasAsyncRequest; // Whether we have a running request currently.
+    private AsyncGPUReadbackRequest request; // The request we're currently waiting for to complete.
 
 #if UNITY_EDITOR
-    public Texture _Editor_GpuTexture
-    {
-        get { return gpuTexture; }
-    }
+    public Texture _Editor_GpuTexture => gpuTexture;
 #endif
 
     /// <summary>
@@ -45,12 +47,28 @@ public sealed class PickingProvider : MonoBehaviour
     [CanBeNull]
     public Pickable GetPickableAt(Vector2 screenPosition)
     {
-        if (cpuTexture == null)
+        if (!cpuData.IsCreated)
             return null;
 
-        Color32 packedId = cpuTexture.GetPixel((int) screenPosition.x / scaleDivisor, (int) screenPosition.y / scaleDivisor);
+        int scaledX = (int) screenPosition.x / scaleDivisor;
+        int scaledY = (int) screenPosition.y / scaleDivisor;
+        Color32 packedId = cpuData[scaledX + dataWidth * scaledY];
         int id = PickingManager.DecodeId(packedId);
         return PickingManager.GetPickable(id);
+    }
+
+    private void OnDisable()
+    {
+        camera = null;
+
+        dataWidth = 0;
+        dataHeight = 0;
+
+        if (gpuTexture != null) gpuTexture.Release();
+        if (cpuData.IsCreated) cpuData.Dispose();
+
+        hasAsyncRequest = false;
+        request = default(AsyncGPUReadbackRequest);
     }
 
     private void Update()
@@ -59,17 +77,20 @@ public sealed class PickingProvider : MonoBehaviour
             camera = GetComponent<Camera>();
 
         // If camera size changed (e.g. window resize) also adjust sizes of our picking textures.
-        if (gpuTexture == null || gpuTexture.width != camera.pixelWidth / scaleDivisor || gpuTexture.height != camera.pixelHeight / scaleDivisor)
+        int currentWidth = camera.pixelWidth / scaleDivisor;
+        int currentHeight = camera.pixelHeight / scaleDivisor;
+        if (gpuTexture == null || dataWidth != currentWidth || dataHeight != currentHeight)
         {
             if (gpuTexture != null) gpuTexture.Release();
-            if (cpuTexture != null) Destroy(cpuTexture);
+            if (cpuData.IsCreated) cpuData.Dispose();
+
+            dataWidth = currentWidth;
+            dataHeight = currentHeight;
 
             int depthBits = camera.depthTextureMode == DepthTextureMode.None ? 16 : 0;
-            gpuTexture = new RenderTexture(camera.pixelWidth / scaleDivisor, camera.pixelHeight / scaleDivisor, depthBits, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
+            gpuTexture = new RenderTexture(dataWidth, dataHeight, depthBits, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
             gpuTexture.filterMode = FilterMode.Point;
-            cpuTexture = new Texture2D(camera.pixelWidth / scaleDivisor, camera.pixelHeight / scaleDivisor, TextureFormat.ARGB32, false, true);
-            cpuTexture.filterMode = FilterMode.Point;
-            cpuTexture.wrapMode = TextureWrapMode.Clamp;
+            cpuData = new NativeArray<Color32>(dataWidth * dataHeight, Allocator.Persistent);
         }
 
         RenderTexture oldRenderTexture = camera.targetTexture;
@@ -92,14 +113,19 @@ public sealed class PickingProvider : MonoBehaviour
         camera.renderingPath = oldRenderingPath;
         camera.allowMSAA = oldAllowMsaa;
 
-        // TODO Do readback asynchronously.
+        if (!hasAsyncRequest)
+        {
+            hasAsyncRequest = true;
+            request = AsyncGPUReadback.Request(gpuTexture);
+        }
+        else if (request.done)
+        {
+            if (!request.hasError)
+            {
+                request.GetData<Color32>().CopyTo(cpuData);
+            }
 
-        oldRenderTexture = RenderTexture.active;
-
-        RenderTexture.active = gpuTexture;
-        cpuTexture.ReadPixels(new Rect(0, 0, cpuTexture.width, cpuTexture.height), 0, 0);
-        cpuTexture.Apply();
-
-        RenderTexture.active = oldRenderTexture;
+            request = AsyncGPUReadback.Request(gpuTexture);
+        }
     }
 }
