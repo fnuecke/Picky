@@ -1,7 +1,7 @@
 ﻿using JetBrains.Annotations;
 using Unity.Collections;
 using UnityEngine;
-using UnityEngine.Experimental.Rendering;
+using UnityEngine.Rendering;
 
 /// <summary>
 /// Manager to be used per camera that should provide picking. Usually only the main
